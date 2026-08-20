@@ -76,7 +76,7 @@ def _call_ollama(system_prompt: str, user_message: str) -> str:
             ],
             "stream": False,
         },
-        timeout=120.0,
+        timeout=300.0,
     )
     response.raise_for_status()
     return response.json()["message"]["content"]
