@@ -1,12 +1,8 @@
-import os
-import httpx
-
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-LLM_MODEL = os.getenv("LLM_MODEL", "qwen3.5:latest")
+from .providers import generate_with_fallback
 
 
 def generate_answer(question: str, chunks: list[str], sources: list[str]) -> dict:
-    """Generate a grounded answer with citations using Ollama."""
+    """Generate a grounded answer with citations. Uses Groq → Ollama fallback."""
     context_parts = []
     for i, (chunk, source) in enumerate(zip(chunks, sources)):
         context_parts.append(f"[Source {i + 1}: {source}]\n{chunk}")
@@ -29,21 +25,7 @@ RULES:
 
 Question: {question}"""
 
-    response = httpx.post(
-        f"{OLLAMA_BASE_URL}/api/chat",
-        json={
-            "model": LLM_MODEL,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            "stream": False,
-        },
-        timeout=120.0,
-    )
-    response.raise_for_status()
-    data = response.json()
-    answer = data["message"]["content"]
+    answer, provider = generate_with_fallback(system_prompt, user_message)
 
     # Extract citations from answer
     citations = []
@@ -62,4 +44,5 @@ Question: {question}"""
         "answer": answer,
         "citations": citations,
         "found_in_sources": True,
+        "provider": provider,
     }
