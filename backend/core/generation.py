@@ -1,12 +1,12 @@
 import os
-from anthropic import Anthropic
+import httpx
 
-client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+LLM_MODEL = os.getenv("LLM_MODEL", "qwen3.5:latest")
 
 
 def generate_answer(question: str, chunks: list[str], sources: list[str]) -> dict:
-    """Generate a grounded answer with citations using Claude."""
+    """Generate a grounded answer with citations using Ollama."""
     context_parts = []
     for i, (chunk, source) in enumerate(zip(chunks, sources)):
         context_parts.append(f"[Source {i + 1}: {source}]\n{chunk}")
@@ -29,14 +29,21 @@ RULES:
 
 Question: {question}"""
 
-    response = client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=1024,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_message}],
+    response = httpx.post(
+        f"{OLLAMA_BASE_URL}/api/chat",
+        json={
+            "model": LLM_MODEL,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            "stream": False,
+        },
+        timeout=120.0,
     )
-
-    answer = response.content[0].text
+    response.raise_for_status()
+    data = response.json()
+    answer = data["message"]["content"]
 
     # Extract citations from answer
     citations = []
@@ -44,7 +51,6 @@ Question: {question}"""
     for i, source in enumerate(sources):
         marker = f"[Source {i + 1}]"
         if marker in answer and source not in seen:
-            # Find a relevant snippet around the marker
             idx = answer.find(marker)
             start = max(0, idx - 100)
             end = min(len(answer), idx + 100)

@@ -1,4 +1,5 @@
 import os
+import hashlib
 import chromadb
 from datetime import datetime, timezone
 
@@ -21,7 +22,7 @@ def upsert_chunks(url: str, chunks: list[str], title: str = "") -> int:
     metadatas = []
 
     for i, chunk in enumerate(chunks):
-        url_hash = __import__("hashlib").md5(url.encode()).hexdigest()[:12]
+        url_hash = hashlib.md5(url.encode()).hexdigest()[:12]
         chunk_id = f"{url_hash}_{i}"
         ids.append(chunk_id)
         metadatas.append(
