@@ -1,18 +1,35 @@
 const API_BASE = '/api';
+const N8N_WEBHOOK = 'http://localhost:5678/webhook/ingest-url';
 
 export async function ingestUrl(url) {
-  // Step 1: Send URL to n8n webhook
-  const n8nResponse = await fetch('http://localhost:5678/webhook/ingest-url', {
+  // Try n8n first, fall back to backend direct ingest
+  try {
+    const n8nResponse = await fetch(N8N_WEBHOOK, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (n8nResponse.ok) {
+      return await n8nResponse.json();
+    }
+  } catch {
+    // n8n not available, fall through to backend
+  }
+
+  // Fallback: fetch URL content ourselves and send to backend
+  const response = await fetch(`${API_BASE}/ingest-url`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url }),
   });
 
-  if (!n8nResponse.ok) {
-    throw new Error('Failed to ingest URL via n8n');
+  if (!response.ok) {
+    throw new Error('Failed to ingest URL');
   }
 
-  return await n8nResponse.json();
+  return await response.json();
 }
 
 export async function querySources(question, topK = 5) {

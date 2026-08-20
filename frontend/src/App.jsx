@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import UrlIngestForm from './components/UrlIngestForm';
 import ChatWindow from './components/ChatWindow';
 import SourcesList from './components/SourcesList';
@@ -10,33 +10,38 @@ export default function App() {
   const [sources, setSources] = useState([]);
   const [provider, setProvider] = useState(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [sessionHistory, setSessionHistory] = useState([]);
 
-  const fetchSources = async () => {
+  const fetchSources = useCallback(async () => {
     try {
       const data = await getSources();
       setSources(data.sources);
     } catch (err) {
       console.error('Failed to fetch sources:', err);
     }
-  };
+  }, []);
 
-  const fetchProvider = async () => {
+  const fetchProvider = useCallback(async () => {
     try {
       const data = await getProvider();
       setProvider(data);
     } catch (err) {
       console.error('Failed to fetch provider:', err);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchSources();
     fetchProvider();
-  }, [refreshTrigger]);
+  }, [refreshTrigger, fetchSources, fetchProvider]);
 
   const handleIngestSuccess = () => {
     setRefreshTrigger((prev) => prev + 1);
     fetchSources();
+  };
+
+  const handleNewMessage = (exchange) => {
+    setSessionHistory((prev) => [...prev, exchange]);
   };
 
   return (
@@ -46,10 +51,10 @@ export default function App() {
         <div className="header-right">
           {provider && (
             <span className={`provider-indicator ${provider.active}`}>
-              {provider.active === 'groq' ? 'Groq' : 'Ollama'}
+              {provider.active === 'groq' ? '⚡ Groq' : '🏠 Ollama'}
             </span>
           )}
-          <ExportButton sessionHistory={[]} />
+          <ExportButton sessionHistory={sessionHistory} />
         </div>
       </header>
 
@@ -60,7 +65,10 @@ export default function App() {
 
         <main className="main-content">
           <UrlIngestForm onIngestSuccess={handleIngestSuccess} />
-          <ChatWindow refreshTrigger={refreshTrigger} />
+          <ChatWindow
+            refreshTrigger={refreshTrigger}
+            onNewMessage={handleNewMessage}
+          />
         </main>
       </div>
     </div>

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { querySources } from '../api';
 import MessageBubble from './MessageBubble';
 
-export default function ChatWindow({ refreshTrigger }) {
+export default function ChatWindow({ refreshTrigger, onNewMessage }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -23,16 +23,21 @@ export default function ChatWindow({ refreshTrigger }) {
 
     try {
       const result = await querySources(input);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          text: result.answer,
-          citations: result.citations,
-          provider: result.provider,
-          foundInSources: result.found_in_sources,
-        },
-      ]);
+      const assistantMessage = {
+        role: 'assistant',
+        text: result.answer,
+        citations: result.citations,
+        provider: result.provider,
+        foundInSources: result.found_in_sources,
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
+
+      // Pass exchange to parent for PDF export
+      onNewMessage?.({
+        question: input,
+        answer: result.answer,
+        citations: result.citations,
+      });
     } catch (err) {
       setMessages((prev) => [
         ...prev,
