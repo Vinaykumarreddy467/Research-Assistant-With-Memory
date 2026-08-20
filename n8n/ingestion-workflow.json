@@ -1,0 +1,240 @@
+{
+  "name": "URL Ingestion Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ingest-url",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "ingest-url"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.body.url }}",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": true,
+              "maxRedirects": 5
+            }
+          }
+        }
+      },
+      "id": "fetch-url",
+      "name": "Fetch URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Strip HTML and extract clean text\nconst html = $input.first().json.data || $input.first().json.body || '';\nconst url = $('Webhook').first().json.body.url;\n\n// Basic HTML stripping\nlet text = html\n  // Remove script and style tags entirely\n  .replace(/<\\s*script[^>]*>[\\s\\S]*?<\\s*\\/\\s*script\\s*>/gi, '')\n  .replace(/<\\s*style[^>]*>[\\s\\S]*?<\\s*\\/\\s*style\\s*>/gi, '')\n  // Remove nav, footer, header elements\n  .replace(/<\\s*(nav|footer|header|aside)[^>]*>[\\s\\S]*?<\\s*\\/\\s*(nav|footer|header|aside)\\s*>/gi, '')\n  // Remove HTML tags\n  .replace(/<[^>]+>/g, ' ')\n  // Decode common HTML entities\n  .replace(/&nbsp;/g, ' ')\n  .replace(/&amp;/g, '&')\n  .replace(/&lt;/g, '<')\n  .replace(/&gt;/g, '>')\n  .replace(/&quot;/g, '\"')\n  .replace(/&#39;/g, \"'\")\n  // Collapse whitespace\n  .replace(/\\s+/g, ' ')\n  .trim();\n\n// Extract title\nconst titleMatch = html.match(/<title[^>]*>([^<]+)<\\/title>/i);\nconst title = titleMatch ? titleMatch[1].trim() : '';\n\n// Detect if content looks empty or JS-rendered (very little text)\nconst isJSRendered = text.length < 200;\n\nreturn [{\n  json: {\n    url,\n    raw_text: text,\n    title,\n    isJSRendered,\n    char_count: text.length\n  }\n}];"
+      },
+      "id": "clean-html",
+      "name": "Clean HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isJSRendered }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-content",
+      "name": "Content OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.allorigins.win/raw?url={{ encodeURIComponent($('Webhook').first().json.body.url) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "fallback-fetch",
+      "name": "Fallback Fetch (allorigins)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 440],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Re-clean from fallback fetch\nconst html = $input.first().json.data || $input.first().json.body || '';\nconst url = $('Webhook').first().json.body.url;\n\nlet text = html\n  .replace(/<\\s*script[^>]*>[\\s\\S]*?<\\s*\\/\\s*script\\s*>/gi, '')\n  .replace(/<\\s*style[^>]*>[\\s\\S]*?<\\s*\\/\\s*style\\s*>/gi, '')\n  .replace(/<\\s*(nav|footer|header|aside)[^>]*>[\\s\\S]*?<\\s*\\/\\s*(nav|footer|header|aside)\\s*>/gi, '')\n  .replace(/<[^>]+>/g, ' ')\n  .replace(/&nbsp;/g, ' ')\n  .replace(/&amp;/g, '&')\n  .replace(/&lt;/g, '<')\n  .replace(/&gt;/g, '>')\n  .replace(/&quot;/g, '\"')\n  .replace(/&#39;/g, \"'\")\n  .replace(/\\s+/g, ' ')\n  .trim();\n\nconst titleMatch = html.match(/<title[^>]*>([^<]+)<\\/title>/i);\nconst title = titleMatch ? titleMatch[1].trim() : '';\n\nreturn [{\n  json: {\n    url,\n    raw_text: text,\n    title,\n    char_count: text.length\n  }\n}];"
+      },
+      "id": "clean-fallback",
+      "name": "Clean Fallback HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 440]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/ingest",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $json.url }}"
+            },
+            {
+              "name": "raw_text",
+              "value": "={{ $json.raw_text }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "post-to-backend",
+      "name": "POST to FastAPI /ingest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 180],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'success', message: 'URL ingested', url: $json.url, chunks_added: $json.chunks_added }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-ok",
+      "name": "Respond 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1440, 180]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'error', message: 'Failed to ingest URL', url: $('Webhook').first().json.body.url }) }}",
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "id": "respond-error",
+      "name": "Respond Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1680, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Fetch URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch URL": {
+      "main": [
+        [
+          {
+            "node": "Clean HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean HTML": {
+      "main": [
+        [
+          {
+            "node": "Content OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Content OK?": {
+      "main": [
+        [
+          {
+            "node": "POST to FastAPI /ingest",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fallback Fetch (allorigins)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fallback Fetch (allorigins)": {
+      "main": [
+        [
+          {
+            "node": "Clean Fallback HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Fallback HTML": {
+      "main": [
+        [
+          {
+            "node": "POST to FastAPI /ingest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST to FastAPI /ingest": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "research-assistant"
+    }
+  ]
+}
