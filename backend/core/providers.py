@@ -17,13 +17,27 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+
+# --- Custom exceptions (defined before usage) ---
+class RateLimitError(Exception):
+    pass
+
+
+class TokenLimitError(Exception):
+    pass
+
+
+class GroqError(Exception):
+    pass
+
+
 # --- Config ---
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3.5:latest")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
 
 
 def get_active_provider() -> str:
@@ -54,7 +68,10 @@ def _call_groq(system_prompt: str, user_message: str) -> str:
     if response.status_code == 429:
         raise RateLimitError("Groq rate limit exceeded")
     if response.status_code == 400:
-        body = response.json()
+        try:
+            body = response.json()
+        except Exception:
+            body = {"raw": response.text}
         if "token" in str(body).lower() or "length" in str(body).lower():
             raise TokenLimitError("Groq token limit exceeded")
         raise GroqError(f"Groq error: {body}")
@@ -83,18 +100,6 @@ def _call_ollama(system_prompt: str, user_message: str) -> str:
 
 
 # --- Public interface with fallback ---
-class RateLimitError(Exception):
-    pass
-
-
-class TokenLimitError(Exception):
-    pass
-
-
-class GroqError(Exception):
-    pass
-
-
 def generate_with_fallback(system_prompt: str, user_message: str) -> tuple[str, str]:
     """
     Try Groq first (if configured), fall back to Ollama.

@@ -1,11 +1,13 @@
 import os
-from fastapi import APIRouter
+import logging
+from fastapi import APIRouter, HTTPException
 from models.schemas import QueryRequest, QueryResponse, Citation
 from core.embeddings import embed_query
 from core.retrieval import query_chunks
 from core.generation import generate_answer
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.35"))
 
@@ -13,19 +15,36 @@ SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.35"))
 @router.post("/query", response_model=QueryResponse)
 async def query(req: QueryRequest):
     """Embed the question, retrieve top-k chunks, generate a grounded answer."""
-    question_embedding = embed_query(req.question)
+    # Embed the question
+    try:
+        question_embedding = embed_query(req.question)
+    except Exception as e:
+        logger.error(f"Embedding failed: {e}")
+        raise HTTPException(status_code=503, detail=f"Embedding service unavailable: {e}")
+
     results = query_chunks(question_embedding, top_k=req.top_k)
 
-    documents = results.get("documents", [[]])[0]
-    metadatas = results.get("metadatas", [[]])[0]
-    distances = results.get("distances", [[]])[0]
+    documents = results.get("documents", [[]])
+    metadatas = results.get("metadatas", [[]])
+    distances = results.get("distances", [[]])
 
-    # Filter by similarity threshold (ChromaDB returns L2 distances; lower = more similar)
-    # Convert L2 distance to cosine similarity: similarity = 1 - (distance / 2)
+    # Safely extract first batch (handle empty results)
+    docs = documents[0] if documents and documents[0] else []
+    metas = metadatas[0] if metadatas and metadatas[0] else []
+    dists = distances[0] if distances and distances[0] else []
+
+    if not docs:
+        return QueryResponse(
+            answer="The provided sources do not contain enough information to answer this question.",
+            citations=[],
+            found_in_sources=False,
+        )
+
+    # Filter by similarity threshold
     filtered_chunks = []
     filtered_sources = []
 
-    for doc, meta, dist in zip(documents, metadatas, distances):
+    for doc, meta, dist in zip(docs, metas, dists):
         similarity = 1 - (dist / 2)
         if similarity >= SIMILARITY_THRESHOLD:
             filtered_chunks.append(doc)
@@ -38,7 +57,13 @@ async def query(req: QueryRequest):
             found_in_sources=False,
         )
 
-    result = generate_answer(req.question, filtered_chunks, filtered_sources)
+    # Generate answer
+    try:
+        result = generate_answer(req.question, filtered_chunks, filtered_sources)
+    except Exception as e:
+        logger.error(f"Generation failed: {e}")
+        raise HTTPException(status_code=503, detail=f"LLM service unavailable: {e}")
+
     return QueryResponse(
         answer=result["answer"],
         citations=[Citation(**c) for c in result["citations"]],

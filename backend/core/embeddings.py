@@ -6,18 +6,18 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "qwen3-embedding:8b")
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
-    """Get embeddings for a list of texts via Ollama."""
-    embeddings = []
-    for text in texts:
-        response = httpx.post(
-            f"{OLLAMA_BASE_URL}/api/embed",
-            json={"model": EMBEDDING_MODEL, "input": text},
-            timeout=60.0,
-        )
-        response.raise_for_status()
-        data = response.json()
-        embeddings.append(data["embeddings"][0])
-    return embeddings
+    """Get embeddings for a list of texts via Ollama. Uses batching."""
+    if not texts:
+        return []
+
+    response = httpx.post(
+        f"{OLLAMA_BASE_URL}/api/embed",
+        json={"model": EMBEDDING_MODEL, "input": texts},
+        timeout=httpx.Timeout(300.0, read=300.0),
+    )
+    response.raise_for_status()
+    data = response.json()
+    return data["embeddings"]
 
 
 def embed_query(text: str) -> list[float]:

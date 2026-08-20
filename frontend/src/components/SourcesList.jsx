@@ -8,6 +8,14 @@ export default function SourcesList({ sources }) {
     );
   }
 
+  const getHostname = (url) => {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return url;
+    }
+  };
+
   return (
     <div className="sources-list">
       <h3>Sources ({sources.length})</h3>
@@ -15,7 +23,7 @@ export default function SourcesList({ sources }) {
         {sources.map((source, i) => (
           <li key={i}>
             <a href={source.url} target="_blank" rel="noopener noreferrer">
-              {new URL(source.url).hostname}
+              {getHostname(source.url)}
             </a>
             <span className="source-meta">
               {source.chunk_count} chunks

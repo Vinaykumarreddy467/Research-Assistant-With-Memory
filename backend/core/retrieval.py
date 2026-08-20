@@ -21,8 +21,11 @@ def upsert_chunks(url: str, chunks: list[str], title: str = "") -> int:
     ids = []
     metadatas = []
 
+    # Compute hash once outside the loop
+    url_hash = hashlib.md5(url.encode()).hexdigest()[:12]
+    now = datetime.now(timezone.utc).isoformat()
+
     for i, chunk in enumerate(chunks):
-        url_hash = hashlib.md5(url.encode()).hexdigest()[:12]
         chunk_id = f"{url_hash}_{i}"
         ids.append(chunk_id)
         metadatas.append(
@@ -30,7 +33,7 @@ def upsert_chunks(url: str, chunks: list[str], title: str = "") -> int:
                 "source_url": url,
                 "chunk_index": i,
                 "title": title,
-                "ingested_at": datetime.now(timezone.utc).isoformat(),
+                "ingested_at": now,
             }
         )
 
@@ -45,9 +48,15 @@ def upsert_chunks(url: str, chunks: list[str], title: str = "") -> int:
 
 def query_chunks(question_embedding: list[float], top_k: int = 5) -> dict:
     """Query ChromaDB for the most relevant chunks."""
+    if collection.count() == 0:
+        return {"documents": [[]], "metadatas": [[]], "distances": [[]]}
+
+    # Don't request more results than exist
+    actual_top_k = min(top_k, collection.count())
+
     results = collection.query(
         query_embeddings=[question_embedding],
-        n_results=top_k,
+        n_results=actual_top_k,
         include=["documents", "metadatas", "distances"],
     )
     return results

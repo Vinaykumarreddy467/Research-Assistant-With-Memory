@@ -1,4 +1,5 @@
 from io import BytesIO
+from html import escape
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
@@ -19,8 +20,8 @@ def generate_pdf(session_history: list[dict]) -> bytes:
     story = [Paragraph("Research Assistant — Session Export", title_style), Spacer(1, 12)]
 
     for i, exchange in enumerate(session_history, 1):
-        question = exchange.get("question", "")
-        answer = exchange.get("answer", "")
+        question = escape(str(exchange.get("question", "")))
+        answer = escape(str(exchange.get("answer", "")))
         citations = exchange.get("citations", [])
 
         story.append(Paragraph(f"<b>Q{i}:</b> {question}", q_style))
@@ -28,7 +29,8 @@ def generate_pdf(session_history: list[dict]) -> bytes:
 
         if citations:
             for cite in citations:
-                story.append(Paragraph(f"Source: {cite.get('url', 'N/A')}", cite_style))
+                url = escape(str(cite.get("url", "N/A")))
+                story.append(Paragraph(f"Source: {url}", cite_style))
 
         story.append(Spacer(1, 12))
 

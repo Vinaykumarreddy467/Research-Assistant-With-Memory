@@ -1,4 +1,5 @@
 import re
+import logging
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -6,6 +7,7 @@ from core.chunking import chunk_text
 from core.retrieval import upsert_chunks
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class DirectIngestRequest(BaseModel):
@@ -81,7 +83,15 @@ async def ingest_url(req: DirectIngestRequest):
 
     # Step 3: Chunk and embed
     chunks = chunk_text(raw_text)
-    count = upsert_chunks(url=req.url, chunks=chunks, title=title)
+
+    try:
+        count = upsert_chunks(url=req.url, chunks=chunks, title=title)
+    except Exception as e:
+        logger.error(f"Embedding/storage failed for {req.url}: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Embedding service unavailable. URL was fetched but could not be processed: {e}",
+        )
 
     return {
         "status": "success",
