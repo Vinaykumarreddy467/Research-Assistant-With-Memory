@@ -1,7 +1,7 @@
 from .providers import generate_with_fallback
 
 
-def generate_answer(question: str, chunks: list[str], sources: list[str]) -> dict:
+def generate_answer(question: str, chunks: list[str], sources: list[str], history: list[dict] = None) -> dict:
     """Generate a grounded answer with citations. Uses Groq → Ollama fallback."""
     context_parts = []
     for i, (chunk, source) in enumerate(zip(chunks, sources)):
@@ -25,24 +25,42 @@ RULES:
 
 Question: {question}"""
 
-    answer, provider = generate_with_fallback(system_prompt, user_message)
+    answer, provider = generate_with_fallback(system_prompt, user_message, history=history)
 
-    # Extract citations from answer
+    # Extract citations from answer and map them to actual chunks
     citations = []
     seen = set()
-    for i, source in enumerate(sources):
+    for i, (chunk, source) in enumerate(zip(chunks, sources)):
         marker = f"[Source {i + 1}]"
         if marker in answer and source not in seen:
-            idx = answer.find(marker)
-            start = max(0, idx - 100)
-            end = min(len(answer), idx + 100)
-            snippet = answer[start:end].strip()
+            snippet = chunk.strip()
+            if len(snippet) > 250:
+                snippet = snippet[:247] + "..."
             citations.append({"url": source, "snippet": snippet})
             seen.add(source)
 
+    # Clean up the answer text (remove [Source N] and boilerplate prefixes)
+    import re
+    # Remove markers like [Source 1], [Source 1, 2], [Source 1][Source 2]
+    answer_clean = re.sub(r"\[Source\s*\d+([,\s]*\d+)*\]", "", answer)
+    # Strip duplicate spaces and newlines around them
+    answer_clean = re.sub(r"\s+", " ", answer_clean).strip()
+
+    # Remove boilerplate prefixes
+    prefixes = [
+        r"^based\s+on\s+the\s+(provided\s+)?(source|text|document|wikipedia|excerpt)s?\s*(material|excerpts|information|chunks)?(,\s*)?",
+        r"^according\s+to\s+the\s+(provided\s+)?(source|text|document|wikipedia|excerpt)s?\s*(material|excerpts|information|chunks)?(,\s*)?"
+    ]
+    for pref in prefixes:
+        answer_clean = re.sub(pref, "", answer_clean, flags=re.IGNORECASE)
+
+    answer_clean = answer_clean.strip()
+    if answer_clean and answer_clean[0].islower():
+        answer_clean = answer_clean[0].upper() + answer_clean[1:]
+
     return {
-        "answer": answer,
+        "answer": answer_clean,
         "citations": citations,
-        "found_in_sources": True,
+        "found_in_sources": len(citations) > 0,
         "provider": provider,
     }

@@ -16,8 +16,8 @@ export default function UrlIngestForm({ onIngestSuccess }) {
     try {
       const result = await ingestUrl(url);
       setMessage({ type: 'success', text: `Ingested! ${result.chunks_added || ''} chunks added.` });
+      onIngestSuccess?.(url);
       setUrl('');
-      onIngestSuccess?.();
     } catch (err) {
       setMessage({ type: 'error', text: err.message });
     } finally {

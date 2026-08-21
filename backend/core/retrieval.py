@@ -46,7 +46,7 @@ def upsert_chunks(url: str, chunks: list[str], title: str = "") -> int:
     return len(chunks)
 
 
-def query_chunks(question_embedding: list[float], top_k: int = 5) -> dict:
+def query_chunks(question_embedding: list[float], top_k: int = 5, where: dict = None) -> dict:
     """Query ChromaDB for the most relevant chunks."""
     if collection.count() == 0:
         return {"documents": [[]], "metadatas": [[]], "distances": [[]]}
@@ -57,6 +57,7 @@ def query_chunks(question_embedding: list[float], top_k: int = 5) -> dict:
     results = collection.query(
         query_embeddings=[question_embedding],
         n_results=actual_top_k,
+        where=where,
         include=["documents", "metadatas", "distances"],
     )
     return results

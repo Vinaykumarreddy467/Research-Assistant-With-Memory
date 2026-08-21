@@ -5,8 +5,11 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import ingest, query, sources, export, direct_ingest
+from routers import ingest, query, sources, export, direct_ingest, sessions
 from core.providers import get_active_provider, GROQ_API_KEY, GROQ_MODEL, OLLAMA_MODEL
+from core import db
+
+db.init_db()
 
 app = FastAPI(title="Research Assistant API", version="0.1.0")
 
@@ -23,6 +26,7 @@ app.include_router(query.router)
 app.include_router(sources.router)
 app.include_router(export.router)
 app.include_router(direct_ingest.router)
+app.include_router(sessions.router)
 
 
 @app.get("/health")

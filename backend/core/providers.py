@@ -49,18 +49,21 @@ def get_active_provider() -> str:
 
 
 # --- Groq ---
-def _call_groq(system_prompt: str, user_message: str) -> str:
+def _call_groq(system_prompt: str, user_message: str, history: list[dict] = None) -> str:
     """Call Groq API (OpenAI-compatible). Raises on failure."""
+    messages = [{"role": "system", "content": system_prompt}]
+    if history:
+        for msg in history:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": user_message})
+
     response = httpx.post(
         f"{GROQ_BASE_URL}/chat/completions",
         headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
         json={
             "model": GROQ_MODEL,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            "max_tokens": 1024,
+            "messages": messages,
+            "max_tokens": 4096,
             "temperature": 0.3,
         },
         timeout=30.0,
@@ -82,16 +85,19 @@ def _call_groq(system_prompt: str, user_message: str) -> str:
 
 
 # --- Ollama ---
-def _call_ollama(system_prompt: str, user_message: str) -> str:
+def _call_ollama(system_prompt: str, user_message: str, history: list[dict] = None) -> str:
     """Call Ollama local API."""
+    messages = [{"role": "system", "content": system_prompt}]
+    if history:
+        for msg in history:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": user_message})
+
     response = httpx.post(
         f"{OLLAMA_BASE_URL}/api/chat",
         json={
             "model": OLLAMA_MODEL,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
+            "messages": messages,
             "stream": False,
         },
         timeout=300.0,
@@ -101,14 +107,14 @@ def _call_ollama(system_prompt: str, user_message: str) -> str:
 
 
 # --- Public interface with fallback ---
-def generate_with_fallback(system_prompt: str, user_message: str) -> tuple[str, str]:
+def generate_with_fallback(system_prompt: str, user_message: str, history: list[dict] = None) -> tuple[str, str]:
     """
     Try Groq first (if configured), fall back to Ollama.
     Returns (answer_text, provider_used).
     """
     if GROQ_API_KEY:
         try:
-            answer = _call_groq(system_prompt, user_message)
+            answer = _call_groq(system_prompt, user_message, history)
             logger.info("Response generated via Groq")
             # Strip reasoning process tags if present
             answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL).strip()
@@ -125,7 +131,7 @@ def generate_with_fallback(system_prompt: str, user_message: str) -> tuple[str, 
             logger.warning("Groq unreachable, falling back to Ollama")
 
     # Ollama fallback
-    answer = _call_ollama(system_prompt, user_message)
+    answer = _call_ollama(system_prompt, user_message, history)
     logger.info("Response generated via Ollama")
     # Strip reasoning process tags if present
     answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL).strip()
