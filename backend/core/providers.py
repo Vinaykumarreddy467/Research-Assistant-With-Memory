@@ -13,6 +13,7 @@ Handles:
 
 import os
 import logging
+import re
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,8 @@ def generate_with_fallback(system_prompt: str, user_message: str) -> tuple[str, 
         try:
             answer = _call_groq(system_prompt, user_message)
             logger.info("Response generated via Groq")
+            # Strip reasoning process tags if present
+            answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL).strip()
             return answer, "groq"
         except RateLimitError:
             logger.warning("Groq rate limited, falling back to Ollama")
@@ -124,4 +127,6 @@ def generate_with_fallback(system_prompt: str, user_message: str) -> tuple[str, 
     # Ollama fallback
     answer = _call_ollama(system_prompt, user_message)
     logger.info("Response generated via Ollama")
+    # Strip reasoning process tags if present
+    answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL).strip()
     return answer, "ollama"

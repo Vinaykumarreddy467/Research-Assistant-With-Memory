@@ -89,7 +89,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:8000/ingest",
+        "url": "http://backend:8000/ingest",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
@@ -181,14 +181,14 @@
       "main": [
         [
           {
-            "node": "POST to FastAPI /ingest",
+            "node": "Fallback Fetch (allorigins)",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Fallback Fetch (allorigins)",
+            "node": "POST to FastAPI /ingest",
             "type": "main",
             "index": 0
           }
