@@ -8,7 +8,7 @@ export async function ingestUrl(url) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(180000),
     });
 
     if (n8nResponse.ok) {
