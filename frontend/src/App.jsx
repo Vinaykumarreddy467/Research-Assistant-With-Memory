@@ -13,6 +13,8 @@ export default function App() {
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [sessionHistory, setSessionHistory] = useState([]);
+  const [topK, setTopK] = useState(5);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const fetchSources = useCallback(async () => {
     try {
@@ -90,7 +92,12 @@ export default function App() {
       setActiveSessionId(existing.id);
     } else {
       try {
-        const hostname = new URL(url).hostname;
+        let hostname;
+        try {
+          hostname = new URL(url).hostname;
+        } catch {
+          hostname = url.replace('file://', '');
+        }
         const title = `Chat: ${hostname}`;
         const newSession = await createSession(title, url);
         setSessions((prev) => [newSession, ...prev]);
@@ -136,6 +143,11 @@ export default function App() {
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
+  // Filter conversations
+  const filteredSessions = sessions.filter((s) =>
+    s.title.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
     <div className="app">
       <header className="app-header">
@@ -143,7 +155,7 @@ export default function App() {
         <div className="header-right">
           {provider && (
             <span className={`provider-indicator ${provider.active}`}>
-              {provider.active === 'groq' ? '⚡ Groq' : '🏠 Ollama'}
+              {provider.active === 'groq' ? '⚡ Groq Primary' : '🛡️ Ollama Fallback'}
             </span>
           )}
           <ExportButton sessionHistory={sessionHistory} sessionTitle={activeSession?.title} />
@@ -153,13 +165,41 @@ export default function App() {
       <div className="app-body">
         <aside className="sidebar">
           <button className="new-chat-btn" onClick={handleNewChat}>
-            ➕ New Chat
+            ➕ New Conversation
           </button>
+
+          <div className="sidebar-settings glass-card">
+            <h3>⚙️ RAG Engine Settings</h3>
+            <div className="sidebar-settings-content">
+              <label htmlFor="topK-slider" style={{ display: 'block', marginBottom: '6px' }}>
+                Top K Context Chunks
+              </label>
+              <div className="slider-container">
+                <input
+                  type="range"
+                  id="topK-slider"
+                  min="1"
+                  max="10"
+                  value={topK}
+                  onChange={(e) => setTopK(parseInt(e.target.value))}
+                />
+                <span className="slider-value">{topK}</span>
+              </div>
+            </div>
+          </div>
 
           <div className="sessions-list">
             <h3>Conversations</h3>
+            <input
+              type="text"
+              className="sidebar-search"
+              placeholder="🔍 Search chats..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ marginBottom: '12px' }}
+            />
             <ul>
-              {sessions.map((session) => (
+              {filteredSessions.map((session) => (
                 <li
                   key={session.id}
                   className={`session-item ${session.id === activeSessionId ? 'active' : ''}`}
@@ -188,6 +228,7 @@ export default function App() {
             activeSessionId={activeSessionId}
             onMessagesChange={handleMessagesChange}
             refreshTrigger={refreshTrigger}
+            topK={topK}
           />
         </main>
       </div>

@@ -2,11 +2,12 @@ import { useState, useRef, useEffect } from 'react';
 import { querySources, getSessionMessages } from '../api';
 import MessageBubble from './MessageBubble';
 
-export default function ChatWindow({ activeSessionId, onMessagesChange, refreshTrigger }) {
+export default function ChatWindow({ activeSessionId, onMessagesChange, refreshTrigger, topK }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [bibOpen, setBibOpen] = useState(false);
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
@@ -56,7 +57,7 @@ export default function ChatWindow({ activeSessionId, onMessagesChange, refreshT
     setLoading(true);
 
     try {
-      const result = await querySources(input, 5, activeSessionId);
+      const result = await querySources(input, topK, activeSessionId);
       const assistantMessage = {
         role: 'assistant',
         text: result.answer,
@@ -77,11 +78,35 @@ export default function ChatWindow({ activeSessionId, onMessagesChange, refreshT
     }
   };
 
+  const getBibliography = () => {
+    const cited = {};
+    messages.forEach((msg) => {
+      if (msg.role === 'assistant' && msg.citations) {
+        msg.citations.forEach((cite) => {
+          if (cite.url) {
+            let hostname;
+            try {
+              hostname = new URL(cite.url).hostname;
+            } catch {
+              hostname = cite.url.replace('file://', '');
+            }
+            cited[cite.url] = hostname;
+          }
+        });
+      }
+    });
+    return cited;
+  };
+
+  const bibliography = getBibliography();
+  const hasBibliography = Object.keys(bibliography).length > 0;
+
   if (!activeSessionId) {
     return (
       <div className="chat-window">
         <div className="messages">
           <div className="empty-state">
+            <span>💡</span>
             <h2>No Active Chat</h2>
             <p>Select or create a conversation in the sidebar to start chatting.</p>
           </div>
@@ -99,13 +124,36 @@ export default function ChatWindow({ activeSessionId, onMessagesChange, refreshT
           </div>
         ) : messages.length === 0 ? (
           <div className="empty-state">
-            <h2>Research Assistant</h2>
-            <p>Ask questions about your sources. Follow-up queries will remember prior conversation context.</p>
+            <span>💡</span>
+            <h2>Start Grounded Research</h2>
+            <p>Ask a question below. The assistant will retrieve relevant chunks from your index and construct a response complete with citations.</p>
           </div>
         ) : (
-          messages.map((msg, i) => (
-            <MessageBubble key={i} message={msg} />
-          ))
+          <>
+            {hasBibliography && (
+              <div className="bibliography-expander">
+                <div className="bibliography-header" onClick={() => setBibOpen(!bibOpen)}>
+                  <span>📚 Bibliography (Sources Cited in this Chat)</span>
+                  <span>{bibOpen ? '▲' : '▼'}</span>
+                </div>
+                {bibOpen && (
+                  <div className="bibliography-content">
+                    <p style={{ color: 'var(--text-secondary)' }}>The following sources were referenced to construct responses in this session:</p>
+                    <ul>
+                      {Object.entries(bibliography).map(([url, hostname]) => (
+                        <li key={url}>
+                          • <a href={url} target="_blank" rel="noopener noreferrer">{hostname}</a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+            {messages.map((msg, i) => (
+              <MessageBubble key={i} message={msg} />
+            ))}
+          </>
         )}
         {loading && (
           <div className="message-bubble assistant loading">
@@ -125,7 +173,7 @@ export default function ChatWindow({ activeSessionId, onMessagesChange, refreshT
           placeholder="Ask a question about your sources..."
           disabled={loading || historyLoading}
         />
-        <button type="submit" disabled={loading || historyLoading || !input.trim()}>
+        <button type="submit" className="primary-btn" disabled={loading || historyLoading || !input.trim()}>
           Send
         </button>
       </form>

@@ -2,7 +2,7 @@ import os
 import httpx
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "qwen3-embedding:8b")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-minilm:33m")
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:

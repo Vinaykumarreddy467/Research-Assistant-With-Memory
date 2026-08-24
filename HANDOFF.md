@@ -115,7 +115,7 @@ GROQ_API_KEY=gsk_...
 GROQ_MODEL=qwen/qwen3.6-27b
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=llama3.2:3b
-EMBEDDING_MODEL=nomic-embed-text:latest
+EMBEDDING_MODEL=all-minilm:33m
 
 # LangSmith Tracing Configuration
 LANGCHAIN_TRACING_V2=true
@@ -176,7 +176,7 @@ docker compose up ollama
 ```
 Models needed (pull manually if not present):
 ```bash
-docker exec -it <ollama-container> ollama pull nomic-embed-text:latest
+docker exec -it <ollama-container> ollama pull all-minilm:33m
 docker exec -it <ollama-container> ollama pull llama3.2:3b
 ```
 
@@ -406,7 +406,7 @@ Remember to pull the model: `docker exec -it <container> ollama pull <model>`
 ### Change Embedding Model:
 Edit `backend/.env`:
 ```env
-EMBEDDING_MODEL=nomic-embed-text:latest
+EMBEDDING_MODEL=all-minilm:33m
 ```
 
 ### Adjust Similarity Threshold:
