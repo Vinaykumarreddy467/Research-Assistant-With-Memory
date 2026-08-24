@@ -136,7 +136,7 @@ def _call_ollama(system_prompt: str, user_message: str, history: list[dict] = No
             "messages": messages,
             "stream": False,
         },
-        timeout=300.0,
+        timeout=None,
     )
     response.raise_for_status()
     return response.json()["message"]["content"]

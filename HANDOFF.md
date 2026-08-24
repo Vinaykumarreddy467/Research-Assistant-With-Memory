@@ -89,7 +89,7 @@ A **RAG (Retrieval-Augmented Generation)** system that:
 
 ---
 
-## 4. LLM Provider System
+## 4. LLM Provider & Tracing System
 
 **File:** `backend/core/providers.py`
 
@@ -102,6 +102,13 @@ A **RAG (Retrieval-Augmented Generation)** system that:
 - Groq token limit exceeded → Ollama
 - Groq connection error / unreachable → Ollama
 
+### Ollama Client Timeout:
+- The HTTP request timeout for Ollama is set to `None` to prevent `ReadTimeout` exceptions during long inference generation runs on CPU.
+
+### Tracing & Monitoring (LangSmith):
+- The RAG query pipeline (`rag_query`) and LLM provider calls are instrumented using LangSmith's `@traceable` decorator.
+- Setting `LANGCHAIN_TRACING_V2=true` and providing `LANGCHAIN_API_KEY` in `.env` automatically publishes runs to the LangSmith dashboard.
+
 ### Current Config (`backend/.env`):
 ```env
 GROQ_API_KEY=gsk_...
@@ -109,6 +116,11 @@ GROQ_MODEL=qwen/qwen3.6-27b
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=llama3.2:3b
 EMBEDDING_MODEL=nomic-embed-text:latest
+
+# LangSmith Tracing Configuration
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=lsv2_pt_...
+LANGCHAIN_PROJECT=Research_Assistant_with_memory
 ```
 
 ---
@@ -455,6 +467,7 @@ chromadb==0.5.23
 httpx==0.28.1
 pydantic==2.10.4
 reportlab==4.2.5
+langsmith>=0.2.0
 ```
 
 ### Streamlit Packages

@@ -81,6 +81,8 @@ A grounded, citation-backed RAG (Retrieval-Augmented Generation) system. Web URL
 | Streamlit UI | **Streamlit** | Fast, Python-native alternative chat dashboard with full feature parity |
 | Configuration | **python-dotenv** | Loads API credentials and configurations from `.env` |
 | PDF Export | **reportlab** | Dynamically renders session Q&A history to a downloadable PDF |
+| Observability | **LangSmith** | Tracing and monitoring for the RAG query chain and LLM provider invocations |
+
 
 ---
 
@@ -247,6 +249,11 @@ CHROMA_COLLECTION_NAME=sources
 TOP_K_RESULTS=5
 SIMILARITY_THRESHOLD=0.35
 CORS_ALLOWED_ORIGIN=http://localhost:5173
+
+# LangSmith Tracing & Observability
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=lsv2_pt_...
+LANGCHAIN_PROJECT=Research_Assistant_with_memory
 ```
 
 ---
@@ -310,6 +317,9 @@ streamlit run app.py --server.port 8501
 3. **Similarity Cutoffs:** To prevent the LLM from hallucinating answers based on unrelated chunks, a similarity threshold of `0.35` is enforced. Chunks below this are ignored before the prompt reaches the LLM.
 4. **Fallback & Robustness:** Cloud LLM (Groq) is used for speed and intelligence, but falls back to Ollama instantly on network timeouts, token limit failures, or rate-limiting error codes.
 5. **Thinking Tag Stripping:** Modern reasoning models output internal thoughts within `<think>` tags. The backend detects and strips these blocks out before returning answers, keeping the chat clean.
+6. **Ecosystem Observability (LangSmith):** Integrates standard tracing parameters to track pipeline performance, context chunk similarity, and model latencies in a unified observability dashboard.
+7. **Timeout Prevention:** Disables request timeout boundaries for local Ollama invocation to guarantee that CPU-driven local inference completes without triggering network timeout exceptions.
+
 
 ---
 
