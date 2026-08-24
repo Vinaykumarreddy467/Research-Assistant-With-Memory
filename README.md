@@ -1,8 +1,8 @@
-# Research Assistant With Memory
+# Research Assistant with Memory
 
 > Drop URLs, ask questions across all of them like they are one document.
 
-A grounded, citation-backed RAG (Retrieval-Augmented Generation) system. URLs are scraped and ingested via an n8n webhook pipeline, embedded and stored in ChromaDB, and queried through a React + FastAPI chat interface powered by Claude. Every answer is traceable back to the source URL it came from, with an explicit "not found in sources" fallback instead of hallucination.
+A grounded, citation-backed RAG (Retrieval-Augmented Generation) system. Web URLs are scraped and ingested via an n8n webhook pipeline (with direct backend fallback), chunked, embedded locally via Ollama (`nomic-embed-text:latest`), and stored in ChromaDB. The system supports multi-turn chat sessions with persistence in a local SQLite database, selectable scoped search, and a premium React + Vite frontend or a Python-native Streamlit dashboard. Answers are generated using Groq (`qwen/qwen3.6-27b`) with an automatic failover to local Ollama (`llama3.2:3b`), and any reasoning/thinking tags (e.g., `<think>...</think>`) are automatically stripped. Every claim is citation-backed with a clickable reference, and PDF export allows downloading the full Q&A history.
 
 ---
 
@@ -12,7 +12,7 @@ A grounded, citation-backed RAG (Retrieval-Augmented Generation) system. URLs ar
 - [Tech Stack](#tech-stack)
 - [System Flow](#system-flow)
 - [Directory Structure](#directory-structure)
-- [Data Model](#data-model)
+- [Data Storage Models](#data-storage-models)
 - [API Reference](#api-reference)
 - [n8n Ingestion Workflow](#n8n-ingestion-workflow)
 - [Environment Variables](#environment-variables)
@@ -26,44 +26,44 @@ A grounded, citation-backed RAG (Retrieval-Augmented Generation) system. URLs ar
 ## Architecture Overview
 
 ```
-                         ┌─────────────────────────────────────────────┐
+                         ┌──────────────────────────────────────────────┐
                          │                   USER                       │
-                         └───────────────────┬───────────────────────┬─┘
-                                              │                       │
-                              submits URL(s)  │                       │  asks question
-                                              ▼                       ▼
-                         ┌─────────────────────────┐   ┌───────────────────────────┐
-                         │   n8n (Ingestion)        │   │   React Frontend (Vite)   │
-                         │   Webhook trigger         │   │   Chat UI + Source panel  │
-                         └────────────┬─────────────┘   └──────────────┬─────────────┘
-                                      │                                │
-                          scrape/clean │                     REST calls │ (fetch/SSE)
-                                      ▼                                ▼
-                         ┌─────────────────────────────────────────────────┐
-                         │                FastAPI Backend                   │
-                         │  ┌───────────────┐  ┌───────────────────────┐   │
-                         │  │ /ingest       │  │ /query                │   │
-                         │  │ /sources      │  │ /export-pdf           │   │
-                         │  └───────┬───────┘  └───────────┬────────────┘   │
-                         └──────────┼──────────────────────┼────────────────┘
-                                    │                       │
-                     chunk + embed  │                       │  retrieve top-k chunks
-                                    ▼                       ▼
-                         ┌─────────────────────┐   ┌─────────────────────────┐
-                         │ OpenAI Embeddings API │   │      ChromaDB            │
-                         │ text-embedding-3-small│◄─►│  persistent local store  │
-                         └─────────────────────┘   └─────────────────────────┘
-                                                              │
-                                                  relevant chunks + metadata
-                                                              ▼
-                                                    ┌───────────────────────┐
-                                                    │     Claude API         │
-                                                    │  grounded answer +     │
-                                                    │  citations             │
-                                                    └───────────────────────┘
+                         └─────┬──────────────────────────────────┬─────┘
+                               │                                  │
+                               │ submits URL(s)                   │ asks question
+                               ▼                                  ▼
+                 ┌─────────────┴───────────┐          ┌───────────┴──────────────┐
+                 │   n8n (Ingestion)       │          │   Frontends:             │
+                 │   Webhook trigger       │          │   - React UI (Port 5173) │
+                 └─────────────┬───────────┘          │   - Streamlit (Port 8501)│
+                               │                      └───────────┬──────────────┘
+                  scrape/clean │                                  │ REST calls
+                               ▼                                  ▼
+                 ┌──────────────────────────────────────────────────────────────┐
+                 │                       FastAPI Backend                        │
+                 │  ┌────────────────────────┐      ┌────────────────────────┐  │
+                 │  │ /ingest & /ingest-url  │      │ /query                 │  │
+                 │  │ /sources               │      │ /sessions & /messages  │  │
+                 │  └───────────┬────────────┘      └───────────┬────────────┘  │
+                 └──────────────┼───────────────────────────────┼───────────────┘
+                                │                               │
+                 chunk & embed  │                               │ retrieve top-k chunks
+                                ▼                               ▼
+                 ┌──────────────┴───────────┐      ┌────────────┴─────────────┐
+                 │   Ollama Local API       │◄────►│   ChromaDB               │
+                 │   nomic-embed-text       │      │   persistent local store │
+                 └──────────────────────────┘      └──────────────────────────┘
+                                                                │
+                                                    relevant chunks + metadata
+                                                                ▼
+                                                   ┌────────────┴─────────────┐
+                                                   │    LLM Providers:        │
+                                                   │    - Groq (Cloud - Pref) │
+                                                   │    - Ollama (Local - FB) │
+                                                   └──────────────────────────┘
 ```
 
-**Core principle:** the FastAPI backend is the only component that talks to ChromaDB, OpenAI, and Claude. n8n and React never touch the database or model APIs directly — they only call FastAPI's REST endpoints. This keeps API keys server-side and gives you one place to change the RAG logic.
+**Core principle:** The FastAPI backend acts as the single orchestrator. It is the only component that talks directly to ChromaDB, SQLite, Ollama, and Groq. n8n and the frontend interfaces (React and Streamlit) remain decoupled and only communicate with FastAPI's REST endpoints, keeping keys secure and the application logic centralized.
 
 ---
 
@@ -71,266 +71,263 @@ A grounded, citation-backed RAG (Retrieval-Augmented Generation) system. URLs ar
 
 | Layer | Technology | Purpose |
 |---|---|---|
-| Ingestion pipeline | **n8n** | Webhook receiver, URL scraping/cleaning, triggers backend ingestion |
-| Backend API | **FastAPI** (Python, async) | REST endpoints, orchestrates embedding, retrieval, generation, PDF export |
-| Embeddings | **OpenAI Embeddings API** (`text-embedding-3-small`) | Converts text chunks and queries into vectors |
-| Vector store | **ChromaDB** (persistent client) | Stores chunk embeddings + metadata (source URL, chunk index, ingested_at) |
-| LLM | **Claude API** (Anthropic) | Generates grounded answers with citations from retrieved chunks |
-| Frontend | **React** (Vite) | Chat interface, source citation display, PDF download trigger |
-| Config | **python-dotenv** | Loads API keys and settings from `.env` |
-| PDF export | **reportlab** or **weasyprint** | Renders full Q&A session to a downloadable PDF |
+| Ingestion Pipeline | **n8n** | Webhook receiver, URL scraping/cleaning, redirects to FastAPI ingestion |
+| Backend API | **FastAPI** (Python 3.11) | REST endpoints, handles chunking, embedding, retrieval, session management, and PDF export |
+| Embeddings | **Ollama** (`nomic-embed-text:latest`) | Local embedding generation for chunks and user queries |
+| Vector Store | **ChromaDB** (Persistent) | Stores chunk vector embeddings and metadata (source URL, title, chunk index, timestamp) |
+| Session Store | **SQLite** | Persistent relational storage for chat sessions and conversational history |
+| LLM Providers | **Groq** (`qwen/qwen3.6-27b`) <br> **Ollama** (`llama3.2:3b`) | Answer generation with citations; includes auto-fallback from Groq to Ollama on errors/rate-limits |
+| React UI | **React 19** (Vite) | Premium dark-themed chat interface with session management, source panel, PDF export |
+| Streamlit UI | **Streamlit** | Fast, Python-native alternative chat dashboard with full feature parity |
+| Configuration | **python-dotenv** | Loads API credentials and configurations from `.env` |
+| PDF Export | **reportlab** | Dynamically renders session Q&A history to a downloadable PDF |
 
 ---
 
 ## System Flow
 
-### 1. Ingestion (adding a new URL)
+### 1. Ingestion (Adding a new URL)
+* **n8n Pipeline (Preferred):** User submits a URL. The React/Streamlit client sends it to n8n's webhook node. n8n fetches the HTML, extracts and cleans the main body text, and routes the cleaned payload to the backend's `POST /ingest` endpoint.
+* **Direct Ingestion (Fallback/Direct):** If n8n is offline, the React/Streamlit app or direct REST call targets FastAPI's `POST /ingest-url`. FastAPI fetches the page, cleans it (stripping nav, footer, scripts), falls back to `api.allorigins.win` proxy if thin, and indexes the text.
+* **Vector Storage:** FastAPI splits the text into chunks (~500 words, ~15% overlap), calls Ollama's local embeddings API, and upserts the vectors into ChromaDB along with metadata.
 
-1. User submits a URL (via n8n form trigger, or React sends it to n8n's webhook).
-2. n8n's **Webhook** node receives `{ "url": "..." }`.
-3. n8n scrapes the page (HTTP Request node; headless-browser node as fallback for JS-rendered pages).
-4. n8n cleans HTML → plain text (Function/Code node — strip nav, footer, scripts).
-5. n8n calls FastAPI's `POST /ingest` with `{ url, raw_text }`.
-6. FastAPI:
-   - Chunks text (~500 tokens, ~15% overlap).
-   - Calls OpenAI Embeddings API per chunk.
-   - Upserts vectors into ChromaDB with metadata: `{ source_url, chunk_index, title, ingested_at }`.
-7. Existing sources are untouched — Chroma is additive by design (persistent collection, no wipe).
+### 2. Query (Asking a question)
+1. User types a query in the Chat UI under an active session.
+2. The UI sends a `POST /query` request containing the `question`, `session_id`, and `top_k`.
+3. FastAPI retrieves the active session details and previous conversation history from SQLite.
+4. If the session is scoped to a specific source URL, FastAPI filters the ChromaDB vector search to that URL. Otherwise, it searches the entire vector space.
+5. The question is embedded, and the top-k matches are retrieved. Chunks below the similarity threshold (default: `0.35`) are discarded.
+6. The query, history, and filtered chunks (with source indicators) are sent to the LLM (Groq, falling back to Ollama if needed).
+7. Any reasoning process tags (e.g. `<think>...</think>`) are stripped out. The LLM generates the grounded response.
+8. The question and cleaned answer with citations are stored in the SQLite database, and returned to the UI.
 
-### 2. Query (asking a question)
-
-1. User types a question in the React chat UI.
-2. React calls `POST /query` with `{ question, session_id }`.
-3. FastAPI:
-   - Embeds the question.
-   - Queries ChromaDB for top-k most similar chunks (with metadata).
-   - Builds a prompt: retrieved chunks (each tagged with its source URL) + the question.
-   - Calls Claude API with strict instructions: **answer only from provided chunks; cite the source URL per claim; if no chunk supports the answer, say so explicitly.**
-4. FastAPI returns `{ answer, citations: [{ url, snippet }] }` to React.
-5. React renders the answer with inline citation markers linking to source URLs, and appends the exchange to session history.
-
-### 3. Export
-
-1. User clicks "Download PDF" in React.
-2. React calls `POST /export-pdf` with the full session's Q&A history.
-3. FastAPI renders the transcript (questions, answers, citations) into a PDF and streams it back as a file download.
+### 3. PDF Export
+1. The user clicks "Export PDF".
+2. The frontend sends the structured session Q&A history to `POST /export-pdf`.
+3. FastAPI generates a formatted PDF transcript using ReportLab and streams the document back to the browser.
 
 ---
 
 ## Directory Structure
 
 ```
-research-assistant/
+Research_Assistant_With_Memory/
+├── docker-compose.yml            # Docker setup for n8n, Ollama, and DB configs
+├── run.sh                        # Automated startup script (Backend + React + Streamlit)
+├── stop.sh                       # Automated stop script
+├── n8n/
+│   └── ingestion-workflow.json   # Exported n8n workflow definition
 ├── backend/
-│   ├── main.py                # FastAPI app, route definitions
-│   ├── routers/
-│   │   ├── ingest.py           # POST /ingest
-│   │   ├── query.py            # POST /query
-│   │   ├── sources.py          # GET /sources
-│   │   └── export.py           # POST /export-pdf
+│   ├── main.py                   # FastAPI app entry point and configuration
+│   ├── .env                      # API keys and environment configuration
+│   ├── requirements.txt          # Python dependencies
+│   ├── Dockerfile
+│   ├── chroma_data/              # Local storage for ChromaDB and SQLite DB files
 │   ├── core/
-│   │   ├── chunking.py         # text splitting logic
-│   │   ├── embeddings.py       # OpenAI embedding calls
-│   │   ├── retrieval.py        # ChromaDB query logic
-│   │   ├── generation.py       # Claude API call + citation prompt
-│   │   └── pdf_export.py       # session → PDF renderer
+│   │   ├── chunking.py           # Word-based chunk splitting (500 size, 75 overlap)
+│   │   ├── db.py                 # SQLite session and message storage logic
+│   │   ├── embeddings.py         # Ollama embedding integration
+│   │   ├── generation.py         # Prompt building and citation mapping
+│   │   ├── providers.py          # Groq/Ollama APIs with automatic fallback and tag stripping
+│   │   └── pdf_export.py         # ReportLab PDF creation
 │   ├── models/
-│   │   └── schemas.py          # Pydantic request/response models
-│   ├── chroma_data/             # persistent ChromaDB storage (gitignored)
-│   ├── .env                     # API keys (gitignored)
-│   ├── .env.example
-│   └── requirements.txt
-│
-├── frontend/
+│   │   └── schemas.py            # Pydantic schemas (requests & responses)
+│   └── routers/
+│       ├── direct_ingest.py      # POST /ingest-url (direct fetch, clean, and index)
+│       ├── export.py             # POST /export-pdf
+│       ├── ingest.py             # POST /ingest (webhook payload processor)
+│       ├── query.py              # POST /query (RAG search, chat history, LLM generation)
+│       ├── sessions.py           # CRUD endpoints for persistent chat sessions
+│       └── sources.py            # GET /sources (list ingested documents)
+├── frontend/                     # React Vite Application
 │   ├── src/
-│   │   ├── App.jsx
-│   │   ├── components/
-│   │   │   ├── ChatWindow.jsx
-│   │   │   ├── MessageBubble.jsx
-│   │   │   ├── SourceCitation.jsx
-│   │   │   ├── UrlIngestForm.jsx
-│   │   │   └── ExportButton.jsx
-│   │   ├── api.js               # fetch wrapper to FastAPI
-│   │   └── main.jsx
+│   │   ├── App.jsx               # Layout, main state management
+│   │   ├── api.js                # API client wrapper
+│   │   └── components/           # Chat window, citations, source list, forms
 │   ├── package.json
 │   └── vite.config.js
-│
-├── n8n/
-│   └── ingestion-workflow.json  # exported n8n workflow
-│
-├── docker-compose.yml            # optional: run backend + frontend + n8n together
-└── README.md
+└── streamlit/                    # Streamlit Dashboard Application
+    ├── app.py                    # Streamlit app interface
+    ├── requirements.txt          # Streamlit dependencies
+    └── Dockerfile
 ```
 
 ---
 
-## Data Model
+## Data Storage Models
 
-### ChromaDB collection: `sources`
+### Vector Store (ChromaDB)
+Individual document chunks are embedded and indexed under the `sources` collection.
+* **ID:** `{url_hash}_{chunk_index}`
+* **Document:** Plain text chunk content (~500 words).
+* **Metadata:**
+  * `source_url`: The URL the chunk was scraped from.
+  * `title`: Page HTML title.
+  * `chunk_index`: The sequential index of the chunk.
+  * `ingested_at`: UTC ISO timestamp.
 
-Each chunk is stored as one Chroma entry:
-
-| Field | Type | Description |
-|---|---|---|
-| `id` | string | `{url_hash}_{chunk_index}` |
-| `embedding` | vector | OpenAI `text-embedding-3-small` output (1536-dim) |
-| `document` | string | the chunk text itself |
-| `metadata.source_url` | string | original URL |
-| `metadata.title` | string | page title if extracted |
-| `metadata.chunk_index` | int | position within the source document |
-| `metadata.ingested_at` | ISO timestamp | when it was added |
-
-This metadata is what makes citations possible — every chunk Claude sees carries its source URL, and the generation prompt requires Claude to cite that URL for any claim drawn from it.
+### Session Store (SQLite)
+Stored at `backend/chroma_data/sessions.db` with relational constraints.
+* **`sessions` Table:**
+  * `id` (TEXT, PK): UUID.
+  * `title` (TEXT): Conversation title.
+  * `source_url` (TEXT, Nullable): Scopes the chat session to search only this URL if specified.
+  * `created_at` (TEXT): ISO timestamp.
+* **`messages` Table:**
+  * `id` (INTEGER, PK): Auto-incrementing ID.
+  * `session_id` (TEXT, FK): Links to the active session.
+  * `role` (TEXT): `user` or `assistant`.
+  * `content` (TEXT): The message text.
+  * `citations` (TEXT, Nullable): JSON string array of citations containing `{url, snippet}`.
+  * `created_at` (TEXT): ISO timestamp.
 
 ---
 
 ## API Reference
 
-### `POST /ingest`
-Called by n8n after scraping a URL.
+### Session Management
 
-**Request:**
-```json
-{
-  "url": "https://example.com/article",
-  "raw_text": "full scraped page text..."
-}
-```
-**Response:**
-```json
-{ "status": "success", "chunks_added": 14, "url": "https://example.com/article" }
-```
+#### `GET /sessions`
+Returns a list of all active conversations.
+* **Response:** `200 OK` (JSON array of sessions)
 
-### `POST /query`
-Called by the React frontend for each user question.
+#### `POST /sessions`
+Creates a new conversation session.
+* **Request Body:** `{ "title": "Chat Title", "source_url": "optional_url_to_scope_chat" }`
+* **Response:** `200 OK` (created session details)
 
-**Request:**
-```json
-{ "question": "What did the article say about X?", "top_k": 5 }
-```
-**Response:**
-```json
-{
-  "answer": "According to the source, X is ...",
-  "citations": [
-    { "url": "https://example.com/article", "snippet": "relevant excerpt..." }
-  ],
-  "found_in_sources": true
-}
-```
-If no relevant chunks are found above a similarity threshold, `found_in_sources: false` and the answer is a plain "not found in the ingested sources" message — no fallback to the model's general knowledge.
+#### `GET /sessions/{session_id}/messages`
+Retrieves full history of messages for a session.
+* **Response:** `200 OK` (JSON array of messages with parsed citations)
 
-### `GET /sources`
-Returns the list of ingested URLs (for a sidebar showing "what's in the knowledge base").
+#### `DELETE /sessions/{session_id}`
+Deletes a session and cascadingly removes all of its messages.
+* **Response:** `200 OK`
 
-**Response:**
-```json
-{ "sources": [{ "url": "...", "ingested_at": "...", "chunk_count": 14 }] }
-```
+### Ingestion & Search
 
-### `POST /export-pdf`
-Renders the current session's Q&A history to PDF.
+#### `POST /ingest`
+Used by n8n to supply pre-scraped web text.
+* **Request Body:** `{ "url": "...", "raw_text": "...", "title": "..." }`
 
-**Request:**
-```json
-{ "session_history": [{ "question": "...", "answer": "...", "citations": [...] }] }
-```
-**Response:** `application/pdf` file stream.
+#### `POST /ingest-url`
+Fetches, cleans, and indexes the URL directly.
+* **Request Body:** `{ "url": "..." }`
 
----
+#### `POST /query`
+Performs semantic retrieval, loads SQLite history, and generates a grounded response.
+* **Request Body:** `{ "question": "...", "session_id": "optional-uuid", "top_k": 5 }`
 
-## n8n Ingestion Workflow
+#### `GET /sources`
+Lists all unique ingested URLs, ingestion times, and total chunks.
 
-```
-[Webhook: POST /webhook/ingest-url]
-        │
-        ▼
-[HTTP Request: fetch the URL]
-        │
-        ▼
-[Code node: strip HTML → clean text]
-        │  (fallback branch: if content looks empty/JS-rendered,
-        │   route to a headless-browser / reader-API node instead)
-        ▼
-[HTTP Request: POST to FastAPI /ingest]
-        │
-        ▼
-[Respond to Webhook: 200 OK]
-```
-
-Export this as `n8n/ingestion-workflow.json` so it's versioned alongside the code.
+#### `GET /provider`
+Reports which LLM provider is active (Groq or Ollama) and details the currently selected model.
 
 ---
 
 ## Environment Variables
 
-`backend/.env`:
+Configure these in `backend/.env` (a template is available in `backend/.env.example`):
 ```env
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
+# LLM Providers
+GROQ_API_KEY=gsk_...                  # Leave blank to force local Ollama execution
+GROQ_MODEL=qwen/qwen3.6-27b           # Preferred cloud LLM model
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.2:3b              # Fallback local LLM model
+
+# Embeddings
+EMBEDDING_MODEL=nomic-embed-text:latest
+
+# Storage Configuration
 CHROMA_PERSIST_DIR=./chroma_data
 CHROMA_COLLECTION_NAME=sources
-EMBEDDING_MODEL=text-embedding-3-small
-CLAUDE_MODEL=claude-sonnet-4-6
+
+# Parameters
 TOP_K_RESULTS=5
 SIMILARITY_THRESHOLD=0.35
 CORS_ALLOWED_ORIGIN=http://localhost:5173
-```
-
-`frontend/.env`:
-```env
-VITE_API_BASE_URL=http://localhost:8000
 ```
 
 ---
 
 ## Setup & Run
 
-### Backend
+### The Automated Way (Linux/macOS)
+You can start all three applications simultaneously (FastAPI, React Dev Server, and Streamlit) with logs outputted to root-level log files:
 ```bash
-cd backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # fill in your keys
-uvicorn main:app --reload --port 8000
+# Start all services
+./run.sh
+
+# Monitor logs
+tail -f backend.log frontend.log streamlit.log
+
+# Stop all services
+./stop.sh
 ```
 
-### Frontend
+### The Manual Way
+
+#### 1. Setup Ollama
+Make sure Ollama is installed and running, then pull the necessary models:
+```bash
+ollama pull nomic-embed-text:latest
+ollama pull llama3.2:3b
+```
+
+#### 2. Run Backend
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+# Set up your .env file
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+#### 3. Run React Frontend
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-### n8n
+#### 4. Run Streamlit UI
 ```bash
-npx n8n
-# import n8n/ingestion-workflow.json via the n8n UI
-# point its final HTTP Request node at http://localhost:8000/ingest
+cd streamlit
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+streamlit run app.py --server.port 8501
 ```
-
-Once all three are running: submit a URL through n8n's webhook (or a form pointing at it), then open the React app at `http://localhost:5173` and start asking questions.
 
 ---
 
 ## Design Decisions
 
-- **FastAPI as the single gatekeeper to Chroma/OpenAI/Claude** — keeps secrets server-side, gives one place to tune retrieval/prompting logic, and lets n8n and React stay "dumb" clients.
-- **Persistent ChromaDB client, additive by design** — ingesting new URLs never wipes or re-indexes existing collections, satisfying the "no losing prior sources" requirement.
-- **Citation-or-refuse prompting** — the Claude system prompt explicitly instructs: only answer from retrieved chunks, cite the source URL per claim, and say "not found in sources" if retrieval returns nothing above the similarity threshold. This is enforced at the prompt level, not just requested — combined with a similarity-score cutoff before chunks are even passed to Claude.
-- **Chunking with overlap** — prevents facts from being split across chunk boundaries and lost during retrieval.
+1. **FastAPI Server-Side Orchestration:** Keeps database files, Chroma collections, and API keys securely in the backend. Frontends remain lightweight.
+2. **SQLite relational persistence:** SQLite was selected for session and conversational tracking because of its zero-configuration local storage, simplicity, and transactional integrity.
+3. **Similarity Cutoffs:** To prevent the LLM from hallucinating answers based on unrelated chunks, a similarity threshold of `0.35` is enforced. Chunks below this are ignored before the prompt reaches the LLM.
+4. **Fallback & Robustness:** Cloud LLM (Groq) is used for speed and intelligence, but falls back to Ollama instantly on network timeouts, token limit failures, or rate-limiting error codes.
+5. **Thinking Tag Stripping:** Modern reasoning models output internal thoughts within `<think>` tags. The backend detects and strips these blocks out before returning answers, keeping the chat clean.
+
+---
 
 ## Known Limitations
 
-- Scraping is HTTP-only by default; JS-heavy sites need the headless-browser fallback branch in n8n.
-- No per-user auth in v1 — single shared knowledge base.
-- No streaming responses in v1 (full answer returned at once); can be added via SSE later.
-- PDF export covers the current session only, not the full source archive.
+1. **JS-heavy rendering:** Pages that build their DOM entirely through client-side JS will yield thin text when scraping directly. Setting up the n8n headless browser helper resolves this.
+2. **GPU Availability:** Embedding and local inference speed is dependent on local GPU acceleration. If run on CPU alone, ingest and local Ollama queries can take significantly longer.
+3. **Chunking Boundaries:** Word-based chunking can occasionally sever paragraphs or code blocks. Semantic chunking is planned for future releases.
+
+---
 
 ## Roadmap
 
-- [ ] Streaming answers (SSE) from `/query`
-- [ ] Per-user/session isolation with auth
-- [ ] Source deduplication (re-ingesting the same URL updates rather than duplicates)
-- [ ] Deploy via `docker-compose` (backend + frontend + n8n in one stack)
+- [x] Persistent session history using SQLite.
+- [x] Streamlit alternative web dashboard.
+- [x] Automate starting and stopping dev environments (`run.sh`/`stop.sh`).
+- [x] Automatic LLM provider failover.
+- [x] Stripping of `<think>` reasoning blocks.
+- [ ] Support direct document uploads (PDF, TXT, DOCX) in both UIs.
+- [ ] Add streaming responses from LLM endpoints.
+- [ ] Implement user authentication and workspace isolation.
