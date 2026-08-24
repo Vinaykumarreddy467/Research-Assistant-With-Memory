@@ -62,7 +62,7 @@ export async function getProvider() {
   return await response.json();
 }
 
-export async function exportPdf(sessionHistory) {
+export async function exportPdf(sessionHistory, filename = 'session-export') {
   const response = await fetch(`${API_BASE}/export-pdf`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -77,7 +77,9 @@ export async function exportPdf(sessionHistory) {
   const url = window.URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'session-export.pdf';
+  // Sanitize filename: remove special chars, replace spaces with dashes
+  const safeName = filename.replace(/[^a-zA-Z0-9\s\-]/g, '').replace(/\s+/g, '-').substring(0, 50);
+  a.download = `${safeName}.pdf`;
   a.click();
   window.URL.revokeObjectURL(url);
 }

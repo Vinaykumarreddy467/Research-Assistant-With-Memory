@@ -134,6 +134,8 @@ export default function App() {
     setSessionHistory(history);
   }, []);
 
+  const activeSession = sessions.find((s) => s.id === activeSessionId);
+
   return (
     <div className="app">
       <header className="app-header">
@@ -144,7 +146,7 @@ export default function App() {
               {provider.active === 'groq' ? '⚡ Groq' : '🏠 Ollama'}
             </span>
           )}
-          <ExportButton sessionHistory={sessionHistory} />
+          <ExportButton sessionHistory={sessionHistory} sessionTitle={activeSession?.title} />
         </div>
       </header>
 
