@@ -18,6 +18,40 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# --- LangSmith tracing (optional) ---
+LANGSMITH_ENABLED = os.getenv("LANGSMITH_TRACING", "").lower() == "true" and bool(os.getenv("LANGSMITH_API_KEY"))
+_run = None
+_trace = None
+
+if LANGSMITH_ENABLED:
+    try:
+        from langsmith import traceable
+        from langsmith import Client as LangSmithClient
+
+        _ls_client = LangSmithClient()
+        logger.info("LangSmith tracing enabled")
+
+        def trace_llm_call(func):
+            """Decorator to trace LLM calls with LangSmith."""
+            @traceable(
+                name=func.__name__,
+                run_type="llm",
+                metadata={
+                    "project": os.getenv("LANGSMITH_PROJECT", "research-assistant"),
+                },
+            )
+            def wrapper(system_prompt: str, user_message: str, history: list[dict] = None, **kwargs):
+                return func(system_prompt, user_message, history=history, **kwargs)
+            return wrapper
+    except ImportError:
+        logger.warning("langsmith package not installed, tracing disabled")
+        LANGSMITH_ENABLED = False
+        def trace_llm_call(func):
+            return func
+else:
+    def trace_llm_call(func):
+        return func
+
 
 # --- Custom exceptions (defined before usage) ---
 class RateLimitError(Exception):
@@ -49,6 +83,7 @@ def get_active_provider() -> str:
 
 
 # --- Groq ---
+@trace_llm_call
 def _call_groq(system_prompt: str, user_message: str, history: list[dict] = None) -> str:
     """Call Groq API (OpenAI-compatible). Raises on failure."""
     messages = [{"role": "system", "content": system_prompt}]
@@ -85,6 +120,7 @@ def _call_groq(system_prompt: str, user_message: str, history: list[dict] = None
 
 
 # --- Ollama ---
+@trace_llm_call
 def _call_ollama(system_prompt: str, user_message: str, history: list[dict] = None) -> str:
     """Call Ollama local API."""
     messages = [{"role": "system", "content": system_prompt}]

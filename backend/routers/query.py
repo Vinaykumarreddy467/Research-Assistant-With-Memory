@@ -6,11 +6,28 @@ from core.embeddings import embed_query
 from core.retrieval import query_chunks
 from core.generation import generate_answer
 from core import db
+from core.providers import LANGSMITH_ENABLED
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.35"))
+
+# LangSmith traceable for the full RAG pipeline
+if LANGSMITH_ENABLED:
+    try:
+        from langsmith import traceable
+
+        @traceable(name="rag_query", run_type="chain")
+        def _rag_pipeline(question: str, chunks: list, sources: list, history: list = None):
+            """Traced RAG pipeline: generate answer from chunks."""
+            return generate_answer(question, chunks, sources, history=history)
+    except ImportError:
+        def _rag_pipeline(question: str, chunks: list, sources: list, history: list = None):
+            return generate_answer(question, chunks, sources, history=history)
+else:
+    def _rag_pipeline(question: str, chunks: list, sources: list, history: list = None):
+        return generate_answer(question, chunks, sources, history=history)
 
 
 @router.post("/query", response_model=QueryResponse)
@@ -89,7 +106,7 @@ async def query(req: QueryRequest):
     # Generate answer
     try:
         history_formatted = [{"role": m["role"], "content": m["content"]} for m in history] if history else None
-        result = generate_answer(req.question, filtered_chunks, filtered_sources, history=history_formatted)
+        result = _rag_pipeline(req.question, filtered_chunks, filtered_sources, history=history_formatted)
     except Exception as e:
         logger.error(f"Generation failed: {e}")
         raise HTTPException(status_code=503, detail=f"LLM service unavailable: {e}")

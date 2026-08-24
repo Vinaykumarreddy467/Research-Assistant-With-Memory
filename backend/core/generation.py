@@ -1,4 +1,20 @@
-from .providers import generate_with_fallback
+import re
+from .providers import generate_with_fallback, LANGSMITH_ENABLED
+
+# LangSmith traceable decorator for the full RAG generation step
+if LANGSMITH_ENABLED:
+    try:
+        from langsmith import traceable
+
+        @traceable(name="generate_answer", run_type="chain")
+        def _generate_with_trace(system_prompt: str, user_message: str, history: list[dict] = None):
+            return generate_with_fallback(system_prompt, user_message, history=history)
+    except ImportError:
+        def _generate_with_trace(system_prompt: str, user_message: str, history: list[dict] = None):
+            return generate_with_fallback(system_prompt, user_message, history=history)
+else:
+    def _generate_with_trace(system_prompt: str, user_message: str, history: list[dict] = None):
+        return generate_with_fallback(system_prompt, user_message, history=history)
 
 
 def generate_answer(question: str, chunks: list[str], sources: list[str], history: list[dict] = None) -> dict:
@@ -25,7 +41,7 @@ RULES:
 
 Question: {question}"""
 
-    answer, provider = generate_with_fallback(system_prompt, user_message, history=history)
+    answer, provider = _generate_with_trace(system_prompt, user_message, history=history)
 
     # Extract citations from answer and map them to actual chunks
     citations = []
