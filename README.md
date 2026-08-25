@@ -26,44 +26,187 @@ A grounded, citation-backed RAG (Retrieval-Augmented Generation) system. Web URL
 ## Architecture Overview
 
 ```
-                         ┌──────────────────────────────────────────────┐
-                         │                   USER                       │
-                         └─────┬──────────────────────────────────┬─────┘
-                               │                                  │
-                               │ submits URL(s)                   │ asks question
-                               ▼                                  ▼
-                 ┌─────────────┴───────────┐          ┌───────────┴──────────────┐
-                 │   n8n (Ingestion)       │          │   Frontends:             │
-                 │   Webhook trigger       │          │   - React UI (Port 5173) │
-                 └─────────────┬───────────┘          │   - Streamlit (Port 8501)│
-                               │                      └───────────┬──────────────┘
-                  scrape/clean │                                  │ REST calls
-                               ▼                                  ▼
-                 ┌──────────────────────────────────────────────────────────────┐
-                 │                       FastAPI Backend                        │
-                 │  ┌────────────────────────┐      ┌────────────────────────┐  │
-                 │  │ /ingest & /ingest-url  │      │ /query                 │  │
-                 │  │ /sources               │      │ /sessions & /messages  │  │
-                 │  └───────────┬────────────┘      └───────────┬────────────┘  │
-                 └──────────────┼───────────────────────────────┼───────────────┘
-                                │                               │
-                 chunk & embed  │                               │ retrieve top-k chunks
-                                ▼                               ▼
-                 ┌──────────────┴───────────┐      ┌────────────┴─────────────┐
-                 │   Ollama Local API       │◄────►│   ChromaDB               │
-                 │   nomic-embed-text       │      │   persistent local store │
-                 └──────────────────────────┘      └──────────────────────────┘
-                                                                │
-                                                    relevant chunks + metadata
-                                                                ▼
-                                                   ┌────────────┴─────────────┐
-                                                   │    LLM Providers:        │
-                                                   │    - Groq (Cloud - Pref) │
-                                                   │    - Ollama (Local - FB) │
-                                                   └──────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        USER INTERFACES                          │
+│                                                                 │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌───────────────┐ │
+│  │   React + Vite   │  │    Streamlit     │  │    n8n UI     │ │
+│  │   :5173          │  │    :8501         │  │    :5678      │ │
+│  │   (Main UI)      │  │   (Alt UI)       │  │  (Workflow)   │ │
+│  └────────┬─────────┘  └────────┬─────────┘  └───────┬───────┘ │
+└───────────┼─────────────────────┼─────────────────────┼─────────┘
+            │                     │                     │
+            ▼                     ▼                     ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     BACKEND (FastAPI :8000)                      │
+│                                                                 │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐            │
+│  │   /query     │  │  /ingest    │  │ /ingest-url │            │
+│  │  (RAG)       │  │  (from n8n) │  │ (direct)    │            │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘            │
+│         │                │                │                      │
+│         ▼                ▼                ▼                      │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐            │
+│  │  Embeddings │  │   Chunking  │  │   HTML      │            │
+│  │  (query)    │  │  (500 words)│  │   Cleaner   │            │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘            │
+│         │                │                │                      │
+│         ▼                ▼                ▼                      │
+│  ┌─────────────────────────────────────────────────┐           │
+│  │              RETRIEVAL (ChromaDB)                │           │
+│  │   Store chunks + embeddings / Query similar     │           │
+│  └──────────────────────┬──────────────────────────┘           │
+│                         │                                       │
+│                         ▼                                       │
+│  ┌─────────────────────────────────────────────────┐           │
+│  │            GENERATION (LLM Provider)            │           │
+│  │                                                 │           │
+│  │   Groq (cloud) ──fallback──▶ Ollama (local)     │           │
+│  │   + LangSmith tracing (optional)                │           │
+│  └─────────────────────────────────────────────────┘           │
+└─────────────────────────────────────────────────────────────────┘
+            │                                    │
+            ▼                                    ▼
+┌──────────────────────┐          ┌──────────────────────┐
+│   ChromaDB           │          │   Ollama             │
+│   (Vector Store)     │          │   (Local LLMs)       │
+│   - Embeddings       │          │   - nomic-embed-text │
+│   - Chunks           │          │   - qwen3 / llama3   │
+│   - Metadata         │          │   - 11434            │
+└──────────────────────┘          └──────────────────────┘
 ```
 
 **Core principle:** The FastAPI backend acts as the single orchestrator. It is the only component that talks directly to ChromaDB, SQLite, Ollama, and Groq. n8n and the frontend interfaces (React and Streamlit) remain decoupled and only communicate with FastAPI's REST endpoints, keeping keys secure and the application logic centralized.
+
+### Data Flow — URL Ingestion
+```
+User pastes URL
+       │
+       ▼
+┌──────────────┐    POST /webhook/ingest-url
+│   Frontend   │ ──────────────────────────────▶  n8n
+│  api.js      │                                  │
+└──────────────┘                                  ▼
+       │                                  ┌──────────────┐
+       │                                  │  Fetch URL   │
+       │                                  │  (HTTP GET)  │
+       │                                  └──────┬───────┘
+       │                                         │
+       │                                         ▼
+       │                                  ┌──────────────┐
+       │                                  │  Clean HTML  │
+       │                                  │  (strip tags)│
+       │                                  └──────┬───────┘
+       │                                         │
+       │                                    ┌────┴────┐
+       │                                    │ Content │
+       │                                    │  OK?    │
+       │                                    └────┬────┘
+       │                              thin ◀─────┼────▶ OK
+       │                               │              │
+       │                               ▼              │
+       │                        ┌──────────────┐     │
+       │                        │ allorigins   │     │
+       │                        │ (proxy)      │     │
+       │                        └──────┬───────┘     │
+       │                               │              │
+       │                               ▼              ▼
+       │                        POST /ingest  ◀──────┘
+       │                                  │
+       │                                  ▼
+       │                         ┌──────────────┐
+       │                         │   Chunking   │
+       │                         │  500 words   │
+       │                         │  75 overlap  │
+       │                         └──────┬───────┘
+       │                                │
+       │                                ▼
+       │                         ┌──────────────┐
+       │                         │  Embeddings  │
+       │                         │  (Ollama)    │
+       │                         └──────┬───────┘
+       │                                │
+       │                                ▼
+       │                         ┌──────────────┐
+       └────────────────────────▶│  ChromaDB    │
+                                 │  (upsert)    │
+                                 └──────────────┘
+```
+
+**Two paths to ingest:**
+1. **Via n8n** — Frontend → n8n webhook → fetch & clean → backend `/ingest`
+2. **Direct** — Frontend → backend `/ingest-url` (does fetch & clean itself)
+
+### Data Flow — Query (RAG)
+```
+User asks: "What is agentic AI?"
+       │
+       ▼
+┌──────────────┐
+│   Frontend   │  POST /query {question, top_k, session_id}
+└──────┬───────┘
+       │
+       ▼
+┌──────────────────────────────────────────┐
+│              BACKEND /query              │
+│                                          │
+│  1. EMBED question                       │
+│     └─▶ Ollama (nomic-embed-text)        │
+│         "What is agentic AI?" → [0.12, -0.34, ...]  │
+│                                          │
+│  2. SEARCH ChromaDB                      │
+│     └─▶ Find top-5 similar chunks       │
+│         Distance threshold: 0.35         │
+│                                          │
+│  3. FORMAT context                       │
+│     [Source 1: ibm.com/think/agentic]    │
+│     "Agentic AI refers to systems..."    │
+│                                          │
+│  4. GENERATE answer                      │
+│     └─▶ Groq → (fallback) → Ollama      │
+│         System: "Answer only from sources"│
+│         User: context + question         │
+│                                          │
+│  5. EXTRACT citations                    │
+│     [Source 1] → ibm.com URL + snippet   │
+│                                          │
+│  6. SAVE to session (SQLite)             │
+│     user msg + assistant msg             │
+└──────────────────────────────────────────┘
+       │
+       ▼
+┌──────────────┐
+│   Frontend   │  {answer, citations, provider}
+│  ChatWindow  │
+└──────────────┘
+```
+
+### Provider Fallback System
+```
+generate_with_fallback()
+       │
+       ├─── GROQ_API_KEY set? ──▶ Try Groq
+       │                              │
+       │                    ┌─────────┴─────────┐
+       │                    │                    │
+       │               Success              Failure
+       │               return "groq"         │
+       │                              ┌───────┴───────┐
+       │                              │   429?        │
+       │                              │   token?      │
+       │                              │   offline?    │
+       │                              └───────┬───────┘
+       │                                      │
+       └──────────────────────────────────────┘
+                                          │
+                                          ▼
+                                 Try Ollama (local)
+                                          │
+                                   ┌──────┴──────┐
+                                   │             │
+                                Success      Failure → Error
+                                return "ollama"
+```
 
 ---
 
